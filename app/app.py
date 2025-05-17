@@ -1,142 +1,164 @@
 import streamlit as st
 import pandas as pd
-import joblib
 import numpy as np
+import joblib
 import re
-from difflib import get_close_matches
+from teams import valid_teams
+import matplotlib.pyplot as plt
 
-# -------------------- Load Model Artifacts -------------------- #
-artifacts = joblib.load("xgb_artifacts.pkl")
-team_stats = artifacts["team_stats"]
-
-model = joblib.load("xgb_model_fold1.pkl")
-clf = model["classifier"]
-reg_home = model["regressor_home"]
-reg_away = model["regressor_away"]
-
-# -------------------- Standard Team Names -------------------- #
-STANDARD_TEAM_NAMES = [
-    'Arsenal', 'Aston Villa', 'Bournemouth', 'Brentford', 'Brighton',
-    'Chelsea', 'Crystal Palace', 'Everton', 'Fulham', 'Ipswich Town',
-    'Leicester City', 'Liverpool', 'Manchester City', 'Manchester Utd',
-    'Newcastle Utd', "Nott'ham Forest", 'Southampton', 'Tottenham',
-    'West Ham', 'Wolves', 'Atalanta', 'Bologna', 'Cagliari', 'Como',
-    'Empoli', 'Fiorentina', 'Genoa', 'Hellas Verona', 'Inter',
-    'Juventus', 'Lazio', 'Lecce', 'Milan', 'Monza', 'Napoli', 'Parma',
-    'Roma', 'Torino', 'Udinese', 'Venezia', 'Augsburg',
-    'Bayern Munich', 'Bochum', 'Dortmund', 'Eint Frankfurt',
-    'Freiburg', 'Gladbach', 'Heidenheim', 'Hoffenheim',
-    'Holstein Kiel', 'Leverkusen', 'Mainz 05', 'RB Leipzig',
-    'St. Pauli', 'Stuttgart', 'Union Berlin', 'Werder Bremen',
-    'Wolfsburg', 'Angers', 'Auxerre', 'Brest', 'Le Havre', 'Lens',
-    'Lille', 'Lyon', 'Marseille', 'Monaco', 'Montpellier', 'Nantes',
-    'Nice', 'Paris S-G', 'Reims', 'Rennes', 'Saint-Étienne',
-    'Strasbourg', 'Toulouse', 'Alavés', 'Athletic Club',
-    'Atlético Madrid', 'Barcelona', 'Betis', 'Celta Vigo', 'Espanyol',
-    'Getafe', 'Girona', 'Las Palmas', 'Leganés', 'Mallorca', 'Osasuna',
-    'Rayo Vallecano', 'Real Madrid', 'Real Sociedad', 'Sevilla',
-    'Valencia', 'Valladolid', 'Villarreal', 'Blackburn',
-    'Bristol City', 'Burnley', 'Cardiff City', 'Coventry City',
-    'Derby County', 'Hull City', 'Leeds United', 'Luton Town',
-    'Middlesbrough', 'Millwall', 'Norwich City', 'Oxford United',
-    'Plymouth Argyle', 'Portsmouth', 'Preston', 'QPR', 'Sheffield Utd',
-    'Sheffield Weds', 'Stoke City', 'Sunderland', 'Swansea City',
-    'Watford', 'West Brom', 'Bari', 'Brescia', 'Carrarese',
-    'Catanzaro', 'Cesena', 'Cittadella', 'Cosenza', 'Cremonese',
-    'Frosinone', 'Juve Stabia', 'Mantova', 'Modena', 'Palermo', 'Pisa',
-    'Reggiana', 'Salernitana', 'Sampdoria', 'Sassuolo', 'Spezia',
-    'Südtirol'
-]
-
-# -------------------- Standardization Function -------------------- #
+# ---- Your function: standardize team names (placeholder) ---- #
 def standardize_team_names(df, column):
-    standardized = []
-    for name in df[column]:
-        matches = get_close_matches(name.strip(), STANDARD_TEAM_NAMES, n=1, cutoff=0.8)
-        if matches:
-            standardized.append(matches[0])
-        else:
-            st.warning(f"⚠️ Could not confidently match team name: '{name}'")
-            standardized.append(name.strip())  # fallback
-    df[column] = standardized
+    # Your logic (if applicable)
     return df
 
-# -------------------- Match Parser -------------------- #
-def parse_match_input(user_input):
-    match = re.search(r"(.+?)\s+vs\.?\s+(.+)", user_input, re.IGNORECASE)
-    if match:
-        return match.group(1).strip(), match.group(2).strip()
-    return None, None
+# ---- Prediction Function ---- #
+def predict_fixtures_from_text(home_team, away_team):
+    artifacts = joblib.load("xgb_artifacts.pkl")
+    team_stats = artifacts["team_stats"]
 
-# -------------------- Prediction Function -------------------- #
-def predict_single_match(home_team, away_team):
-    data = pd.DataFrame([{
-        "Home_Team": home_team,
-        "Away_Team": away_team
-    }])
-    data = standardize_team_names(data, "Home_Team")
-    data = standardize_team_names(data, "Away_Team")
-    
-    data["features"] = data.apply(
-        lambda row: (
-            list(team_stats.get(row["Home_Team"], {}).values()) +
-            list(team_stats.get(row["Away_Team"], {}).values())
-        ), axis=1
-    )
-    X_new = np.array(data["features"].tolist())
+    model = joblib.load("xgb_model_fold1.pkl")
+    clf = model["classifier"]
+    reg_home = model["regressor_home"]
+    reg_away = model["regressor_away"]
 
+    # Defensive check
+    if home_team not in team_stats:
+        raise ValueError(f"Home team '{home_team}' not found in team stats.")
+    if away_team not in team_stats:
+        raise ValueError(f"Away team '{away_team}' not found in team stats.")
+
+    # Create features
+    features = list(team_stats[home_team].values()) + list(team_stats[away_team].values())
+
+    if len(features) != 16:
+        raise ValueError(f"Feature shape mismatch. Got {len(features)} instead of 16.")
+
+    X_new = np.array([features])
     class_probs = clf.predict_proba(X_new)
-    home_xg = reg_home.predict(X_new)[0]
-    away_xg = reg_away.predict(X_new)[0]
+    home_xg = reg_home.predict(X_new)
+    away_xg = reg_away.predict(X_new)
 
     return {
-        "home_team": data["Home_Team"].iloc[0],
-        "away_team": data["Away_Team"].iloc[0],
-        "home_win_prob": round(class_probs[0][2] * 100, 1),
-        "draw_prob": round(class_probs[0][1] * 100, 1),
-        "away_win_prob": round(class_probs[0][0] * 100, 1),
-        "home_xg": round(home_xg, 2),
-        "away_xg": round(away_xg, 2)
+        "Home_Team": home_team,
+        "Away_Team": away_team,
+        "Home_Win_Prob": class_probs[0][2],
+        "Draw_Prob": class_probs[0][1],
+        "Away_Win_Prob": class_probs[0][0],
+        "Home_xG": home_xg[0],
+        "Away_xG": away_xg[0]
     }
 
-# -------------------- Streamlit UI -------------------- #
-st.set_page_config(page_title="Football Match Predictor", page_icon="⚽")
-st.title("⚽ PitchPredict")
+# ---- Streamlit UI ---- #
+st.set_page_config(page_title="⚽ Match Predictor Chat", layout="centered")
+st.title("⚽ Football Match Predictor")
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+user_input = st.text_input("Type a fixture like:", "Newcastle Utd vs Nott'ham Forest")
 
-user_input = st.text_input("Type your match query (e.g. 'Brighton vs Arsenal'):")
-
-if user_input:
-    st.session_state.chat_history = []  # Clear chat for each new input
-    st.session_state.chat_history.append({"user": user_input})
-
-    home, away = parse_match_input(user_input)
-    if home and away:
+if " vs " in user_input:
+    home_team, away_team = map(str.strip, user_input.split(" vs "))
+    if st.button("Predict"):
         try:
-            pred = predict_single_match(home, away)
-            response = (
-                f"🏟️ {pred['home_team']} vs {pred['away_team']}\n\n"
-                f"🔮 **Win Probabilities:**\n"
-                f"- 🏠 {pred['home_team']} Win: {pred['home_win_prob']}%\n"
-                f"- 🤝 Draw: {pred['draw_prob']}%\n"
-                f"- 🚌 {pred['away_team']} Win: {pred['away_win_prob']}%\n\n"
-                f"📊 **Expected Goals (xG):**\n"
-                f"- {pred['home_team']}: {pred['home_xg']} xG\n"
-                f"- {pred['away_team']}: {pred['away_xg']} xG"
-            )
-        except Exception as e:
-            response = f"⚠️ Error making prediction: {str(e)}"
-    else:
-        response = "❌ Please enter a valid format like 'Team A vs Team B'"
+            prediction = predict_fixtures_from_text(home_team, away_team)
 
-    st.session_state.chat_history.append({"bot": response})
+            st.success(f"Match: {prediction['Home_Team']} vs {prediction['Away_Team']}")
+            st.write(f"**Expected Goals (xG)**:")
+            st.write(f"🏠 {prediction['Home_Team']}: `{prediction['Home_xG']:.2f}`")
+            st.write(f"🛫 {prediction['Away_Team']}: `{prediction['Away_xG']:.2f}`")
 
+            # ---- Bar Chart for Probabilities ---- #
+            labels = ["Away Win", "Draw", "Home Win"]
+            probs = [
+                prediction["Away_Win_Prob"],
+                prediction["Draw_Prob"],
+                prediction["Home_Win_Prob"]
+            ]
+            colors = ['#e74c3c', '#f1c40f', '#2ecc71']  # red, yellow, green
 
-# Display chat history
-for msg in st.session_state.chat_history:
-    if "user" in msg:
-        st.markdown(f"**🧑 You:** {msg['user']}")
-    if "bot" in msg:
-        st.markdown(f"**🤖 Bot:** {msg['bot']}")
+            fig, ax = plt.subplots()
+            bars = ax.barh(labels, [p * 100 for p in probs], color=colors)
+            ax.set_xlim(0, 100)
+            ax.set_xlabel("Probability (%)")
+
+            for bar in bars:
+                width = bar.get_width()
+                ax.text(width + 1, bar.get_y() + bar.get_height()/2,
+                        f'{width:.1f}%', va='center')
+
+            st.pyplot(fig)
+
+        except ValueError as e:
+            st.error(str(e))
+
+# -------------------- Standardize Helper -------------------- #
+def standardize_team_names(df, column):
+    df[column] = df[column].str.strip()
+    return df
+
+# -------------------- CSV Batch Prediction Function -------------------- #
+def predict_fixtures(fixtures_csv_path):
+    artifacts = joblib.load('xgb_artifacts.pkl')
+    team_stats = artifacts['team_stats']
+
+    models = [joblib.load(f'xgb_model_fold{i+1}.pkl') for i in range(5)]
+
+    new_fixtures = pd.read_csv(fixtures_csv_path)
+    new_fixtures = standardize_team_names(new_fixtures, 'Home_Team')
+    new_fixtures = standardize_team_names(new_fixtures, 'Away_Team')
+
+    new_fixtures['features'] = new_fixtures.apply(
+        lambda row: (
+            list(team_stats.get(row['Home_Team'], {}).values()) +
+            list(team_stats.get(row['Away_Team'], {}).values())
+        ), axis=1
+    )
+
+    # Filter out rows with missing features
+    valid_rows = new_fixtures['features'].apply(lambda x: len(x) == 16)
+    new_fixtures = new_fixtures[valid_rows]
+    X_new = np.array(new_fixtures['features'].tolist())
+
+    class_probs = np.zeros((X_new.shape[0], 3))
+    home_xg = np.zeros(X_new.shape[0])
+    away_xg = np.zeros(X_new.shape[0])
+
+    for model in models:
+        class_probs += model['classifier'].predict_proba(X_new)
+        home_xg += model['regressor_home'].predict(X_new)
+        away_xg += model['regressor_away'].predict(X_new)
+
+    df_preds = pd.DataFrame({
+        'Home_Team': new_fixtures['Home_Team'],
+        'Away_Team': new_fixtures['Away_Team'],
+        'Home_Win_Prob': class_probs[:, 2] / len(models),
+        'Draw_Prob': class_probs[:, 1] / len(models),
+        'Away_Win_Prob': class_probs[:, 0] / len(models),
+        'Predicted_Home_xG': home_xg / len(models),
+        'Predicted_Away_xG': away_xg / len(models)
+    })
+
+    df_preds['Prob_Diff'] = abs(df_preds['Home_Win_Prob'] - df_preds['Away_Win_Prob'])
+    df_sorted = df_preds.sort_values('Prob_Diff', ascending=False)
+    return df_sorted
+
+# -------------------- Streamlit App Section -------------------- #
+
+st.title("📂 Batch Match Predictor")
+
+st.markdown("### Upload a CSV file with your fixtures to get predictions for multiple matches at once.")
+
+uploaded_file = st.file_uploader("Upload your fixtures CSV", type=["csv"])
+
+st.markdown("### 📊 Predictions sorted by Probability Gap")
+if uploaded_file is not None:
+    try:
+        # Save uploaded file temporarily
+        with open("temp_fixtures.csv", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        df_predictions = predict_fixtures("temp_fixtures.csv")
+
+        st.success("✅ Predictions generated successfully!")
+        st.dataframe(df_predictions, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
