@@ -52,7 +52,7 @@ def predict_fixtures_from_text(home_team, away_team):
 st.set_page_config(page_title="⚽ Match Predictor Chat", layout="centered")
 st.title("⚽ Football Match Predictor")
 
-user_input = st.text_input("Type a fixture like:", "Newcastle Utd vs Nott'ham Forest")
+user_input = st.text_input("Type a fixture like:", "Newcastle United vs Nottingham Forest")
 
 if " vs " in user_input:
     home_team, away_team = map(str.strip, user_input.split(" vs "))
